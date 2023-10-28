@@ -1,3 +1,4 @@
+#note this doesn't work well because we are finding a direct likelihood and not a log likelihood.
 import torch
 from torch import nn , optim
 from torch.nn.modules import Module
@@ -80,9 +81,9 @@ def simple_model(data,data_observation_times,epochs=1,sample_number=1,
     else:
         observation_sds = torch.rand(data.shape[1],requires_grad=True,dtype=float)
     
-    input_vars = {"tau":str(tau),"kernal_signal_sd":str(kernal_signal_sd),"kernal_noise_sd":str(kernal_noise_sd),"observation_sds":str(observation_sds)}
+    input_vars = {"tau":str(tau.data),"kernal_signal_sd":str(kernal_signal_sd.data),"kernal_noise_sd":str(kernal_noise_sd.data),"observation_sds":str(observation_sds.data)}
     embedding_func = simple_embedding(theta)
-    optimizer = optim.Adam([tau,kernal_signal_sd, kernal_noise_sd, theta ,observation_sds ], lr=0.01)
+    optimizer = optim.Adam([tau,kernal_signal_sd, kernal_noise_sd, theta ,observation_sds ], lr=0.05)
     loss_tensor = torch.zeros(epochs)
     for epoch in tqdm(range(epochs)):
         optimizer.zero_grad()
@@ -97,11 +98,9 @@ def simple_model(data,data_observation_times,epochs=1,sample_number=1,
         optimizer.step()
         if epoch%100 == 0:
             print(f"Epoch: {epoch}/{epochs} | loss = {loss}")
-        loss_tensor[epoch] = loss
+        loss_tensor[epoch] = loss.data
 
-        #make_dot(loss,params=dict([("tau",tau),("observation_sds",observation_sds),("theta",theta),
-        #                       ("kernal_signal_sd",),("kernal_noise_sd",kernal_noise_sd)])).render("attached", format="png")
-    fit_vars = {"tau":str(tau),"kernal_signal_sd":str(kernal_signal_sd),"kernal_noise_sd":str(kernal_noise_sd),"observation_sds":str(observation_sds)}
+    fit_vars = {"tau":str(tau.data),"kernal_signal_sd":str(kernal_signal_sd.data),"kernal_noise_sd":str(kernal_noise_sd.data),"observation_sds":str(observation_sds.data)}
     return input_vars,fit_vars
 
 def latent_model_dist(tau,kernal_signal_sd,kernal_noise_sd,observation_times):
@@ -131,10 +130,12 @@ def simple_training_data(theta=0.5,tau=1.0,kernal_signal_sd=0.1,kernal_noise_sd=
         data_point_row = data_point_row_dist.sample()
         data_point.append(data_point_row)
     data = torch.stack(data_point)
-    return data,observation_times,param_dict
+    param_dict["z"] = z_vec
+    return data,observation_times,z_vec,param_dict
 
-data,data_observation_times,true_params = simple_training_data()
-print(simple_model(data,data_observation_times,epochs=2000,sample_number=100))
+#data,data_observation_times,true_params = simple_training_data()
+#print(simple_model(data,data_observation_times,epochs=700,sample_number=100))
+#print(true_params)
 #dist1 = torch.distributions.MultivariateNormal(torch.tensor([1.0,0.0]),torch.diag(torch.tensor([1.0,2.0]))).rsample()
 
 #simple_example()
