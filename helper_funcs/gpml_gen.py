@@ -51,7 +51,7 @@ class GPML_Generating_Model():
         def _sample_with_fixed_time(X):
             X_flat = torch.flatten(X)
             return pyro.poutine.condition(self.sample_X, data = {"X_flat": X_flat})(times)
-        nuts_kernal = NUTS(_sample_with_fixed_time, jit_compile=True)
+        nuts_kernal = NUTS(_sample_with_fixed_time)
         mcmc = MCMC(nuts_kernal,num_samples=samples,warmup_steps=burn,num_chains=1,disable_progbar=True,)
         mcmc.run(X)
         return mcmc.get_samples()['z']

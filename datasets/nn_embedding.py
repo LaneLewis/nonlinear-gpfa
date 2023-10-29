@@ -5,10 +5,10 @@ from helper_funcs.gm_ml_mv import GPML_MV_Generating_Model
 def nn_embedding_dataset(device,train_num=100,test_num=15):
     times = torch.linspace(0.0,1.0,300,dtype=float,device=device)
     #initial parameters
-    tau = torch.tensor([0.5],dtype=float,device=device)
+    tau = torch.tensor([2.0],dtype=float,device=device)
     kernal_signal_sd = torch.tensor([0.1],dtype=float,device=device)
     kernal_noise_sd = torch.tensor([0.1],dtype=float,device=device)
-    observation_noise = torch.tensor([0.1,0.1],dtype=float,device=device)
+    observation_noise = torch.tensor([2.0,1.5],dtype=float,device=device)
     nn_model = nn_embedding_model(1,2)
     embedding_func = nn_model.forward
     dataset_generator = GPML_MV_Generating_Model(embedding_func,tau,kernal_signal_sd,kernal_noise_sd,observation_noise)
@@ -19,6 +19,7 @@ def nn_embedding_dataset(device,train_num=100,test_num=15):
             X,z = dataset_generator.sample_joint(times)
             Xs.append(X)
             zs.append(z)
+
     X_out = torch.stack(Xs,dim=0)
     z_out = torch.stack(zs,dim=0)
     times_out = torch.stack((train_num+test_num)*[times])
