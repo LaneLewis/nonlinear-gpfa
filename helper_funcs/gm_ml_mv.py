@@ -27,18 +27,16 @@ class GPML_MV_Generating_Model():
     def _flat_z_dist(self,times):
         #constructs the distribution for flattened zs
         Ks = []
-        ms = []
-        
         for i in range(self.latent_dim):
             Ks.append(kernal_SE(self.taus[i],self.kernal_signal_sds[i]**2,self.kernal_noise_sds[i]**2)(times))
-            ms.append(zero_mean()(times))
+        ts = torch.concat([times]*self.latent_dim)
         flat_z_block_cov = torch.block_diag(*Ks)
-        flat_z_mean = torch.stack(ms)
+        flat_z_mean = zero_mean()(ts)
         gp_prior = dist.MultivariateNormal(flat_z_mean,flat_z_block_cov,validate_args=False)
         return gp_prior
     
     def _flat_X_given_z_dist(self,z):
-        time_steps = z.shape[0]
+        time_steps = z.shape[1]
         #distribution of a single point mean/cov
         embedded_mean = self.vectorized_embedding_func(z)
         #gives the distribution for the flattened data
@@ -55,9 +53,10 @@ class GPML_MV_Generating_Model():
         return X_data
     
     def sample_joint(self,times):
+
         gp_prior = self._flat_z_dist(times)
-        z = pyro.sample("z",gp_prior).reshape((times.shape[0],self.latent_dim))
-        X_flat_dist = self._flat_X_given_z_dist(z.reshape((times.shape[0],self.latent_dim,1)))
+        z = pyro.sample("z",gp_prior).reshape((1,times.shape[0],self.latent_dim))
+        X_flat_dist = self._flat_X_given_z_dist(z.reshape((1,times.shape[0],self.latent_dim)))
         X_flat_sample = pyro.sample("X_flat",X_flat_dist)
         X_data = torch.reshape(X_flat_sample,(times.shape[0],self.embedding_dim))
         return X_data,z
@@ -102,6 +101,7 @@ class GPML_MV_Generating_Model():
             X: tensor of shape [time_dim,neurons]
             times: tensor of shape [time_dim]
             sample_size: int specifying how many times to sample from the vi dist in order to approx the elbo'''
+        #refactor so that vi_means are tensors
         #constructs the block normal dist for the prior
         time_length = times.shape[0]
         Ks = []

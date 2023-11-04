@@ -43,7 +43,6 @@ class GPML_VAE_NN():
                 #copies network and switches off the gradient
                 #generating_model
                 vi_means,vi_cov_diags = self.posterior_vi_nn_model(batch_X)
-                print(vi_means.shape)
                 vi_diag_covs = [torch.diag(vi_cov_diag) for vi_cov_diag in vi_cov_diags]
                 #vi_means = [torch.ones(time_dim,dtype=float)]*num_latents
                 #vi_diag_covs = [2*torch.diag(torch.ones(time_dim,dtype=float))]*num_latents
@@ -86,11 +85,17 @@ class LSTM_Posterior_VI(nn.Module):
         dummy_initial_cxs =  torch.zeros(dynamics_initial_cond.shape).float()
         dynamics_hidden_states,_ = self.initial_to_posterior_states(dummy_inputs,(dynamics_initial_cond.reshape(1,2,5),dummy_initial_cxs.reshape(1,2,5)))
         mean_sds = self.to_mean_sd(dynamics_hidden_states)
-        return mean_sds[:,:,:self.dim_latents],mean_sds[:,:,self.dim_latents:]
+        means,sds = mean_sds[:,:,:self.dim_latents],mean_sds[:,:,self.dim_latents:]
+        sds_tensor = torch.stack([torch.diag_embed(sds[batch_i,:,:].T) for batch_i in range(sds.shape[0])])
+        #sds is currently [batch,time,latents]
+        #want [batch,latents,time,time]
+        #print(torch.diag_embed(sds[0,:,:].T).shape)
+        #print(torch.vmap(torch.diag_embed)(sds).shape)
+        return mean_sds[:,:,:self.dim_latents],sds_tensor
     
-(X_train,X_times_train,z_train),(X_test,X_times_test,z_test),params = nn_embedding_dataset(device,train_num=4,test_num=1,time_divisions=300)
-latent_dim = 1
-observation_dim = 2
+(X_train,X_times_train,z_train),(X_test,X_times_test,z_test),params = nn_embedding_dataset(device,train_num=4,test_num=1,time_divisions=300,latents=3,observed=5)
+latent_dim = 3
+observation_dim = 5
 posterior_nn = LSTM_Posterior_VI(device,latent_dim,observation_dim,3,5)
 embedding_nn = nn_embedding_model(latent_dim,observation_dim)
 GPML_VAE_NN(device,latent_dim,observation_dim,posterior_nn,embedding_nn).fit(X_train,X_times_train)

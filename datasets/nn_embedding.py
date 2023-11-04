@@ -7,11 +7,11 @@ def nn_embedding_dataset(device,train_num=100,test_num=15,time_divisions=300,lat
     #initial parameters
     noise_param = 0.001
     signal_param = 1.0
-    tau = torch.tensor([2.0],dtype=float,device=device)
+    tau = torch.tensor([2.0]*latents,dtype=float,device=device)
     kernal_signal_sd = torch.tensor(latents*[signal_param],dtype=float,device=device)
     kernal_noise_sd = torch.tensor(latents*[noise_param],dtype=float,device=device)
-    observation_noise = torch.tensor([2.0,1.5],dtype=float,device=device)
-    nn_model = nn_embedding_model(1,2)
+    observation_noise = torch.tensor([2.0]*observed,dtype=float,device=device)
+    nn_model = nn_embedding_model(latents,observed)
     embedding_func = nn_model.forward
     dataset_generator = GPML_MV_Generating_Model(embedding_func,tau,kernal_signal_sd,kernal_noise_sd,observation_noise)
     Xs = []
