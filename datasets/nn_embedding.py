@@ -2,12 +2,14 @@ import torch
 from helper_funcs.feedforward_nn import nn_embedding_model
 from helper_funcs.gm_ml_mv import GPML_MV_Generating_Model
 
-def nn_embedding_dataset(device,train_num=100,test_num=15):
-    times = torch.linspace(0.0,1.0,300,dtype=float,device=device)
+def nn_embedding_dataset(device,train_num=100,test_num=15,time_divisions=300,latents=2,observed=3):
+    times = torch.linspace(0.0,1.0,time_divisions,dtype=float,device=device)
     #initial parameters
+    noise_param = 0.001
+    signal_param = 1.0
     tau = torch.tensor([2.0],dtype=float,device=device)
-    kernal_signal_sd = torch.tensor([0.1],dtype=float,device=device)
-    kernal_noise_sd = torch.tensor([0.1],dtype=float,device=device)
+    kernal_signal_sd = torch.tensor(latents*[signal_param],dtype=float,device=device)
+    kernal_noise_sd = torch.tensor(latents*[noise_param],dtype=float,device=device)
     observation_noise = torch.tensor([2.0,1.5],dtype=float,device=device)
     nn_model = nn_embedding_model(1,2)
     embedding_func = nn_model.forward
