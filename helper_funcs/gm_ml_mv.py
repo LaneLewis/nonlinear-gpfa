@@ -157,14 +157,3 @@ def batched_normal_dist_log_likelihood(batch_mean_subtracted_X,inv_observation_c
         return -1/2*(time_dim*const_term + quadratic_term + time_dim*torch.log(observation_det))
     return torch.vmap(normal_log_likelihood_over_time,in_dims=0,out_dims=0)(batch_mean_subtracted_X)
 
-def normal_dist_log_likelihood(mean,cov):
-    dim = mean.shape[0]
-    cov_inv = torch.inv(cov)
-    det_term = torch.log(torch.det(cov))
-    const_term = -1*dim*torch.log(torch.pi)
-    def likelihood(x):
-        diff_term = x - mean
-        quadratic_term = torch.chain_matmul(diff_term.T,cov_inv,diff_term)
-        return -1/2*(const_term + quadratic_term + det_term)
-    return likelihood
-
