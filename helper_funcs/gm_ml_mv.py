@@ -128,7 +128,7 @@ class GPML_MV_Generating_Model():
         #samples from the Vi dist
         sampling_dist = torch.distributions.MultivariateNormal(flat_z_vi_mean.squeeze(),flat_z_vi_block_cov)
         #should have shape [samples,timelength*latents]
-        samples = sampling_dist.sample((sample_size,)).float()
+        samples = sampling_dist.rsample((sample_size,)).float()
         #should have the shape [samples, timelength, latents]
         reshaped_samples = samples.reshape(sample_size,time_length,self.latent_dim)
         #embeds the samples into the observation space mean. embedded_samples should have shape [samples, timelength, neurons]
@@ -139,7 +139,8 @@ class GPML_MV_Generating_Model():
         log_likelihood_per_sample = batched_normal_dist_log_likelihood(samples_mean_subtracted_X,inv_observation_cov,observation_log_det)
         #final term
         approx_elbo = torch.mean(log_likelihood_per_sample) - kl_term
-        return approx_elbo
+        approx_loss = -1 * approx_elbo
+        return approx_loss
 
 def normal_kl_divergence(p_mean,p_cov,q_mean,q_cov):
     '''d(p||q)'''
@@ -168,6 +169,7 @@ def batched_normal_dist_log_likelihood(batch_mean_subtracted_X,inv_observation_c
         time_dim = mean_subtracted_X.shape[0]
         neuron_dim = mean_subtracted_X.shape[1]
         const_term = neuron_dim*torch.log(torch.tensor(2*torch.pi))
+        #sums over all quadratic forms for t
         quadratic_term = torch.trace(torch.linalg.multi_dot([mean_subtracted_X,inv_observation_cov,mean_subtracted_X.T]))
         return -1/2*(time_dim*const_term + quadratic_term + time_dim*observation_log_det)
     return torch.vmap(normal_log_likelihood_over_time,in_dims=0,out_dims=0)(batch_mean_subtracted_X)

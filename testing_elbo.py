@@ -28,9 +28,9 @@ class GPML_VAE_NN():
         self.test_loss_trajectory = []
 
     def fit(self,X_train,X_times_train,epochs=1,learning_rate=0.001,batch_size=2):
-        self.embedding_optimizer = optim.Adam(self.embedding_nn_model.parameters(),lr=learning_rate)
-        self.posterior_optimizer = optim.Adam(self.posterior_vi_nn_model.parameters(),lr=learning_rate)
-        self.optimizer_non_nn = optim.Adam(params=[self.taus,self.kernal_signal_sds,self.kernal_noise_sds,self.observation_noises],lr=learning_rate)
+        self.embedding_optimizer = optim.Adam(self.embedding_nn_model.parameters(),lr=0.0001)
+        self.posterior_optimizer = optim.Adam(self.posterior_vi_nn_model.parameters(),lr=0.01)
+        self.optimizer_non_nn = optim.Adam(params=[self.taus,self.kernal_signal_sds,self.kernal_noise_sds,self.observation_noises],lr=0.00005)
         dataset = TensorDataset(X_train,X_times_train)
         batched_dataset = DataLoader(dataset,batch_size=batch_size)
         #epochs
@@ -44,7 +44,7 @@ class GPML_VAE_NN():
                 vi_means,vi_covs = self.posterior_vi_nn_model(batch_X)
                 total_batch_loss = torch.zeros((1))
                 for sub_batch_index in range(batch_size):
-                    indiv_loss = -1*self.likelihood_model.approx_elbo_loss(vi_means[sub_batch_index,:,:],vi_covs[sub_batch_index,:,:],batch_X[sub_batch_index,:,:],batch_time[sub_batch_index,:])
+                    indiv_loss = self.likelihood_model.approx_elbo_loss(vi_means[sub_batch_index,:,:],vi_covs[sub_batch_index,:,:],batch_X[sub_batch_index,:,:],batch_time[sub_batch_index,:])
                     total_batch_loss += indiv_loss
                 total_batch_loss.backward()
                 self.embedding_optimizer.step()
@@ -92,6 +92,6 @@ class LSTM_Posterior_VI(nn.Module):
 latent_dim = 1
 observation_dim = 6
 (X_train,X_times_train,z_train),(X_test,X_times_test,z_test),params = nn_embedding_dataset(device,train_num=50,test_num=1,time_divisions=300,latents=latent_dim,observed=observation_dim)
-posterior_nn = LSTM_Posterior_VI(device,latent_dim,observation_dim,100,100)
-embedding_nn = nn_embedding_model(latent_dim,observation_dim)
+posterior_nn = LSTM_Posterior_VI(device,latent_dim,observation_dim,20,20)
+embedding_nn = nn_embedding_model(latent_dim,observation_dim,non_output_layers=[(3,nn.Sigmoid())])
 GPML_VAE_NN(device,latent_dim,observation_dim,posterior_nn,embedding_nn).fit(X_train,X_times_train,epochs=500,batch_size=5)
