@@ -30,5 +30,5 @@ class FeedforwardNN(nn.Module):
 
 def nn_embedding_model(input_dim,output_dim,non_output_layers=[(10,nn.ReLU()),(10,nn.ReLU())]):
     nn_layers = [*non_output_layers,(output_dim,None)]
-    nn_model = FeedforwardNN(nn_layers,input_dim).double()
+    nn_model = FeedforwardNN(nn_layers,input_dim)
     return nn_model

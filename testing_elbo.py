@@ -17,17 +17,17 @@ class GPML_VAE_NN():
     def __init__(self,device,latent_dims,observed_dims,posterior_vi_nn_model,embedding_nn_model,vi_samples=500):
         self.embedding_nn_model = embedding_nn_model
         self.posterior_vi_nn_model = posterior_vi_nn_model
-        self.taus = torch.rand(latent_dims,requires_grad=True,device=device,dtype=float)
-        self.kernal_noise_sds = 0.01*torch.ones(latent_dims,device=device,dtype=float) #torch.rand(latent_dims,requires_grad=True,device=device)
+        self.taus = torch.rand(latent_dims,requires_grad=True,device=device)
+        self.kernal_noise_sds = 0.01*torch.ones(latent_dims,device=device) #torch.rand(latent_dims,requires_grad=True,device=device)
         self.kernal_signal_sds = 1.0 - self.kernal_noise_sds #torch.rand(latent_dims,requires_grad=True,device=device)
-        self.observation_noises = torch.rand(observed_dims,requires_grad=True,device=device,dtype=float)
+        self.observation_noises = torch.rand(observed_dims,requires_grad=True,device=device)
         self.likelihood_model = GPML_MV_Generating_Model(self.embedding_nn_model.forward,self.taus,self.kernal_signal_sds,self.kernal_noise_sds,self.observation_noises)
         #generating_model
         self.vi_samples = vi_samples
         self.train_loss_trajectory = []
         self.test_loss_trajectory = []
 
-    def fit(self,X_train,X_times_train,epochs=1,learning_rate=0.005,batch_size=2):
+    def fit(self,X_train,X_times_train,epochs=1,learning_rate=0.001,batch_size=2):
         self.embedding_optimizer = optim.Adam(self.embedding_nn_model.parameters(),lr=learning_rate)
         self.posterior_optimizer = optim.Adam(self.posterior_vi_nn_model.parameters(),lr=learning_rate)
         self.optimizer_non_nn = optim.Adam(params=[self.taus,self.kernal_signal_sds,self.kernal_noise_sds,self.observation_noises],lr=learning_rate)
@@ -37,24 +37,20 @@ class GPML_VAE_NN():
         for epoch in range(epochs):
             #batches
             for batch_X,batch_time in tqdm.tqdm(batched_dataset,desc=f"epoch: {epoch}",colour="cyan"):
+                self.embedding_optimizer.zero_grad()
+                self.posterior_optimizer.zero_grad()
+                self.optimizer_non_nn.zero_grad()
                 batch_size = batch_X.shape[0]
-                time_dim = batch_time.shape[1]
-                num_latents = self.likelihood_model.latent_dim
-                #copies network and switches off the gradient
-                #generating_model
-                vi_means,vi_cov_diags = self.posterior_vi_nn_model(batch_X)
-                vi_diag_covs = [torch.diag(vi_cov_diag) for vi_cov_diag in vi_cov_diags]
-                #vi_means = [torch.ones(time_dim,dtype=float)]*num_latents
-                #vi_diag_covs = [2*torch.diag(torch.ones(time_dim,dtype=float))]*num_latents
-
-                def batched_elbo(single_X,single_time):
-                    return self.likelihood_model.approx_elbo_loss(vi_means,vi_diag_covs,single_X,single_time)
-                
-                batched_loss = torch.vmap(batched_elbo,randomness="same")
-                batched_loss(batch_X,batch_time)
-                #for sub_batch_index in range(batch_size):
-                   
-                    #out = self.likelihood_model.approx_elbo_loss(vi_means,vi_diag_covs,batch_X[sub_batch_index,:,:],batch_time[sub_batch_index,:])
+                vi_means,vi_covs = self.posterior_vi_nn_model(batch_X)
+                total_batch_loss = torch.zeros((1))
+                for sub_batch_index in range(batch_size):
+                    indiv_loss = -1*self.likelihood_model.approx_elbo_loss(vi_means[sub_batch_index,:,:],vi_covs[sub_batch_index,:,:],batch_X[sub_batch_index,:,:],batch_time[sub_batch_index,:])
+                    total_batch_loss += indiv_loss
+                total_batch_loss.backward()
+                self.embedding_optimizer.step()
+                self.posterior_optimizer.step()
+                self.optimizer_non_nn.step()
+            print(f"total_batch_loss: {total_batch_loss} | tau:{self.taus}")
         return {"tau":self.taus,"kernal_signal_sd":self.kernal_signal_sds,"kernal_noise_sd":self.kernal_noise_sds}
     
 if torch.cuda.is_available(): 
@@ -76,6 +72,7 @@ class LSTM_Posterior_VI(nn.Module):
         #assmues X has shape [batches,time,neurons]
         batches = X.shape[0]
         time_steps = X.shape[1]
+        observed = X.shape[2]
         X = X.float()
         #should have shape [hidden_dim_1]
         hidden_states,(_,_) = self.data_to_hidden_layer(X)
@@ -83,7 +80,7 @@ class LSTM_Posterior_VI(nn.Module):
         dynamics_initial_cond = self.hidden_layer_to_initial(last_hidden_states)
         dummy_inputs = torch.zeros((batches,time_steps,1)).float()
         dummy_initial_cxs =  torch.zeros(dynamics_initial_cond.shape).float()
-        dynamics_hidden_states,_ = self.initial_to_posterior_states(dummy_inputs,(dynamics_initial_cond.reshape(1,2,5),dummy_initial_cxs.reshape(1,2,5)))
+        dynamics_hidden_states,_ = self.initial_to_posterior_states(dummy_inputs,(dynamics_initial_cond.reshape(1,batches,dynamics_initial_cond.shape[1]),dummy_initial_cxs.reshape(1,batches,dummy_initial_cxs.shape[1])))
         mean_sds = self.to_mean_sd(dynamics_hidden_states)
         means,sds = mean_sds[:,:,:self.dim_latents],mean_sds[:,:,self.dim_latents:]
         sds_tensor = torch.stack([torch.diag_embed(sds[batch_i,:,:].T) for batch_i in range(sds.shape[0])])
@@ -91,11 +88,10 @@ class LSTM_Posterior_VI(nn.Module):
         #want [batch,latents,time,time]
         #print(torch.diag_embed(sds[0,:,:].T).shape)
         #print(torch.vmap(torch.diag_embed)(sds).shape)
-        return mean_sds[:,:,:self.dim_latents],sds_tensor
-    
-(X_train,X_times_train,z_train),(X_test,X_times_test,z_test),params = nn_embedding_dataset(device,train_num=4,test_num=1,time_divisions=300,latents=3,observed=5)
-latent_dim = 3
-observation_dim = 5
-posterior_nn = LSTM_Posterior_VI(device,latent_dim,observation_dim,3,5)
+        return means.reshape(batches,self.dim_latents,time_steps),sds_tensor**2
+latent_dim = 1
+observation_dim = 6
+(X_train,X_times_train,z_train),(X_test,X_times_test,z_test),params = nn_embedding_dataset(device,train_num=50,test_num=1,time_divisions=300,latents=latent_dim,observed=observation_dim)
+posterior_nn = LSTM_Posterior_VI(device,latent_dim,observation_dim,100,100)
 embedding_nn = nn_embedding_model(latent_dim,observation_dim)
-GPML_VAE_NN(device,latent_dim,observation_dim,posterior_nn,embedding_nn).fit(X_train,X_times_train)
+GPML_VAE_NN(device,latent_dim,observation_dim,posterior_nn,embedding_nn).fit(X_train,X_times_train,epochs=500,batch_size=5)

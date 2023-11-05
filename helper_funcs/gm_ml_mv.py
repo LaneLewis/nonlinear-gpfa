@@ -53,7 +53,6 @@ class GPML_MV_Generating_Model():
         return X_data
     
     def sample_joint(self,times):
-
         gp_prior = self._flat_z_dist(times)
         z = pyro.sample("z",gp_prior).reshape((1,times.shape[0],self.latent_dim))
         X_flat_dist = self._flat_X_given_z_dist(z.reshape((1,times.shape[0],self.latent_dim)))
@@ -94,7 +93,7 @@ class GPML_MV_Generating_Model():
         average_likelihood = torch.mean(vectorized_func_for_expectation(mcmc_samples.reshape((samples,times.shape[0],1))))
         return average_likelihood
     
-    def approx_elbo_loss(self,vi_means,vi_covs,X,times,sample_size=1000):
+    def approx_elbo_loss(self,vi_means,vi_covs,X,times,sample_size=2):
         '''Params:
             vi_means: python list (of size dim_latents) means with shape [time_dim]
             vi_covs: python list (of size dim_latents) cov with shape[time_dim,time_dim]
@@ -103,27 +102,33 @@ class GPML_MV_Generating_Model():
             sample_size: int specifying how many times to sample from the vi dist in order to approx the elbo'''
         #refactor so that vi_means are tensors
         #constructs the block normal dist for the prior
+
+        #vi_means should have shape [time, latents]
+        #vi_covs should have shape [time, time, latents]
+        #print(vi_means.shape)
+        num_latents = vi_means.shape[0]
         time_length = times.shape[0]
         Ks = []
         ms = []
         for i in range(self.latent_dim):
             Ks.append(kernal_SE(self.taus[i],self.kernal_signal_sds[i]**2,self.kernal_noise_sds[i]**2)(times))
             ms.append(zero_mean()(times))
-        flat_z_block_cov = torch.block_diag(*Ks).T
-        flat_z_mean = torch.stack(ms).T
+
+        flat_z_block_cov = torch.block_diag(*Ks).T.float()
+        flat_z_mean = torch.concat(ms).float()
         #constructs the block normal dist for the vi
-        flat_z_vi_mean = torch.stack(vi_means).T
-        flat_z_vi_block_cov = torch.block_diag(*vi_covs).T
+        flat_z_vi_mean = vi_means.reshape(num_latents*time_length).float()
+        flat_z_vi_block_cov = torch.block_diag(*[covs.squeeze() for covs in torch.tensor_split(vi_covs,num_latents)]).T.float()
         #makes the kl_divergence term
         kl_term = normal_kl_divergence(flat_z_vi_mean,flat_z_vi_block_cov,flat_z_mean,flat_z_block_cov)
         #begins the section for sampling the p(x|z) term
-        #prepares some terms that will be used many times 
+        #prepares some terms that will be used many times
         inv_observation_cov = torch.inverse(self.observation_cov)
-        observation_det = torch.det(self.observation_cov)
+        observation_log_det = torch.sum(torch.log(torch.linalg.eigvals(self.observation_cov).real))#torch.det(self.observation_cov)
         #samples from the Vi dist
         sampling_dist = torch.distributions.MultivariateNormal(flat_z_vi_mean.squeeze(),flat_z_vi_block_cov)
         #should have shape [samples,timelength*latents]
-        samples = sampling_dist.sample((sample_size,))
+        samples = sampling_dist.sample((sample_size,)).float()
         #should have the shape [samples, timelength, latents]
         reshaped_samples = samples.reshape(sample_size,time_length,self.latent_dim)
         #embeds the samples into the observation space mean. embedded_samples should have shape [samples, timelength, neurons]
@@ -131,29 +136,39 @@ class GPML_MV_Generating_Model():
         # broadcast X to embedded mean_samples this should have shape [samples, timelength, neurons]
         samples_mean_subtracted_X = X - embedded_samples
         #this should have shape [samples]
-        log_likelihood_per_sample = batched_normal_dist_log_likelihood(samples_mean_subtracted_X,inv_observation_cov,observation_det)
+        log_likelihood_per_sample = batched_normal_dist_log_likelihood(samples_mean_subtracted_X,inv_observation_cov,observation_log_det)
         #final term
-        approx_elbo = torch.mean(log_likelihood_per_sample) + kl_term
+        approx_elbo = torch.mean(log_likelihood_per_sample) - kl_term
         return approx_elbo
 
 def normal_kl_divergence(p_mean,p_cov,q_mean,q_cov):
     '''d(p||q)'''
+    #assumes p is a diagonal matrix
+    #cholsky log det
     dim_p = p_mean.shape[0]
     dim_q = q_mean.shape[0]
     assert dim_p == dim_q
-    q_cov_inv = torch.inverse(q_cov)
-    det_term = torch.log(torch.det(q_cov)/torch.det(p_cov)) - dim_p
-    quadratic_term = torch.linalg.multi_dot([(p_mean - q_mean).T,q_cov_inv,(p_mean - q_mean)])
-    trace_term = torch.trace(torch.matmul(q_cov_inv,p_cov))
-    return det_term + quadratic_term + trace_term
 
-def batched_normal_dist_log_likelihood(batch_mean_subtracted_X,inv_observation_cov,observation_det):
+    q_cov_inv = torch.inverse(q_cov)
+    p_eigs = torch.linalg.eigvals(p_cov).real
+    q_eigs = torch.linalg.eigvals(q_cov).real
+    p_log_det = sum(torch.log(p_eigs))
+    q_log_det = sum(torch.log(q_eigs))
+    #print(torch.det(q_cov))
+    #print(torch.det(p_cov))
+    det_term = q_log_det - p_log_det - dim_p#torch.log(torch.det(q_cov)/torch.det(p_cov)) - dim_p
+    quadratic_term = torch.linalg.multi_dot([(p_mean - q_mean),q_cov_inv,(p_mean - q_mean)])
+    trace_term = torch.trace(torch.matmul(q_cov_inv,p_cov))
+    return 1/2*(det_term + quadratic_term + trace_term)
+
+def batched_normal_dist_log_likelihood(batch_mean_subtracted_X,inv_observation_cov,observation_log_det):
     #batch_mean_subtracted_X has dim [samples, timelength, neurons]
+    #fix this you dumb fuck
     def normal_log_likelihood_over_time(mean_subtracted_X):
         time_dim = mean_subtracted_X.shape[0]
         neuron_dim = mean_subtracted_X.shape[1]
         const_term = neuron_dim*torch.log(torch.tensor(2*torch.pi))
         quadratic_term = torch.trace(torch.linalg.multi_dot([mean_subtracted_X,inv_observation_cov,mean_subtracted_X.T]))
-        return -1/2*(time_dim*const_term + quadratic_term + time_dim*torch.log(observation_det))
+        return -1/2*(time_dim*const_term + quadratic_term + time_dim*observation_log_det)
     return torch.vmap(normal_log_likelihood_over_time,in_dims=0,out_dims=0)(batch_mean_subtracted_X)
 
