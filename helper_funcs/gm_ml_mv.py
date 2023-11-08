@@ -105,7 +105,6 @@ class GPML_MV_Generating_Model():
 
         #vi_means should have shape [time, latents]
         #vi_covs should have shape [time, time, latents]
-        #print(vi_means.shape)
         num_latents = vi_means.shape[0]
         time_length = times.shape[0]
         Ks = []
@@ -138,9 +137,11 @@ class GPML_MV_Generating_Model():
         #this should have shape [samples]
         log_likelihood_per_sample = batched_normal_dist_log_likelihood(samples_mean_subtracted_X,inv_observation_cov,observation_log_det)
         #final term
-        approx_elbo = torch.mean(log_likelihood_per_sample) - kl_term
+        expectation_term = torch.mean(log_likelihood_per_sample)
+
+        approx_elbo = -1*kl_term + expectation_term 
         approx_loss = -1 * approx_elbo
-        return approx_loss
+        return approx_loss, -1*expectation_term,kl_term
 
 def normal_kl_divergence(p_mean,p_cov,q_mean,q_cov):
     '''d(p||q)'''
@@ -155,16 +156,14 @@ def normal_kl_divergence(p_mean,p_cov,q_mean,q_cov):
     q_eigs = torch.linalg.eigvals(q_cov).real
     p_log_det = sum(torch.log(p_eigs))
     q_log_det = sum(torch.log(q_eigs))
-    #print(torch.det(q_cov))
-    #print(torch.det(p_cov))
+    #this term 
     det_term = q_log_det - p_log_det - dim_p#torch.log(torch.det(q_cov)/torch.det(p_cov)) - dim_p
     quadratic_term = torch.linalg.multi_dot([(p_mean - q_mean),q_cov_inv,(p_mean - q_mean)])
     trace_term = torch.trace(torch.matmul(q_cov_inv,p_cov))
-    return 1/2*(det_term + quadratic_term + trace_term)
+    return 1/2*(trace_term + quadratic_term + det_term)# det_term + trace_term + quadratic_term )
 
 def batched_normal_dist_log_likelihood(batch_mean_subtracted_X,inv_observation_cov,observation_log_det):
     #batch_mean_subtracted_X has dim [samples, timelength, neurons]
-    #fix this you dumb fuck
     def normal_log_likelihood_over_time(mean_subtracted_X):
         time_dim = mean_subtracted_X.shape[0]
         neuron_dim = mean_subtracted_X.shape[1]

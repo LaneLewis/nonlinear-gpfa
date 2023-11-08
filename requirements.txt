@@ -1,5 +1,6 @@
 contourpy==1.1.1
 cycler==0.12.1
+dill==0.3.7
 filelock==3.13.0
 fonttools==4.43.1
 fsspec==2023.10.0
